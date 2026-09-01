@@ -1,361 +1,186 @@
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
 from direct.gui.DirectGui import DirectLabel
-from panda3d.core import AmbientLight, DirectionalLight, Fog, TextNode, Vec3, Vec4, WindowProperties, TransparencyAttrib
+from panda3d.core import AmbientLight, DirectionalLight, Fog, PointLight, TextNode, Vec3, Vec4, WindowProperties
 import math
 import random
-
 
 class EclipseGame(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
         self.disableMouse()
-        self.set_background_color(0.008, 0.012, 0.022, 1)
+        self.set_background_color(.006,.009,.018,1)
+        self.keys={k:False for k in ('w','a','s','d','shift')}
+        self.speed=5.5; self.sprint_speed=9.0; self.gravity=23; self.jump_speed=8.5
+        self.vz=0; self.on_ground=True; self.health=100; self.stamina=100
+        self.radius=.62; self.yaw=0; self.pitch=-10; self.target_pitch=-10
+        self.mouse_captured=True; self.sensitivity=.03; self.paused=False
+        self.flashlight=True; self.camera_distance=7.8; self.camera_height=2.7
+        self.obstacles=[]; self.terminals=[]; self.found=set(); self.message_timer=0
+        self.bob=0; random.seed(42)
+        self.world(); self.player(); self.lights(); self.hud(); self.input()
+        self.capture(); self.taskMgr.add(self.update,'eclipse_update')
 
-        self.keys = {k: False for k in ('w', 'a', 's', 'd', 'shift')}
-        self.speed = 5.5
-        self.sprint_speed = 8.5
-        self.gravity = 22.0
-        self.jump_speed = 8.2
-        self.vz = 0.0
-        self.on_ground = True
-        self.radius = 0.62
-
-        self.health = 100
-        self.stamina = 100.0
-        self.flashlight = True
-        self.mouse_captured = True
-        self.sensitivity = 0.035
-        self.yaw = 0.0
-        self.pitch = -9.0
-        self.target_pitch = -9.0
-        self.camera_distance = 7.5
-        self.camera_height = 2.8
-        self.obstacles = []
-        self.interactables = []
-        self.discovered = set()
-        self.message_timer = 0.0
-
-        random.seed(12)
-
-        self.build_world()
-        self.build_player()
-        self.build_lighting()
-        self.build_hud()
-        self.bind_input()
-        self.capture_mouse()
-        self.taskMgr.add(self.update, 'eclipse_update')
-
-    def box(self, name, x, y, z, sx, sy, sz, color, solid=False, emissive=False):
-        m = self.loader.loadModel('models/box')
-        m.setName(name)
-        m.reparentTo(self.render)
-        m.setPos(x, y, z)
-        m.setScale(sx, sy, sz)
-        m.setColor(*color)
-        if emissive:
-            m.setLightOff()
-        if solid:
-            self.obstacles.append((x, y, sx, sy, z + sz))
+    def box(self,name,x,y,z,sx,sy,sz,c,solid=False,lightoff=False):
+        m=self.loader.loadModel('models/box'); m.setName(name); m.reparentTo(self.render)
+        m.setPos(x,y,z); m.setScale(sx,sy,sz); m.setColor(*c)
+        if lightoff: m.setLightOff()
+        if solid: self.obstacles.append((x,y,sx,sy,z+sz))
         return m
 
-    def make_tree(self, x, y, scale=1.0):
-        self.box('TreeTrunk', x, y, 1.4 * scale, .32 * scale, .32 * scale, 1.4 * scale,
-                 (0.18, 0.09, 0.035, 1), True)
-        for z, s in ((2.8, 1.25), (3.5, 1.0), (4.15, .72)):
-            self.box('TreeFoliage', x, y, z * scale, s * scale, s * scale, .65 * scale,
-                     (0.035, 0.16, 0.075, 1), False)
+    def tree(self,x,y,s=1):
+        self.box('trunk',x,y,1.1*s,.28*s,.28*s,1.1*s,(.14,.06,.025,1),True)
+        for z,r in ((2.1,1.2),(2.8,.95),(3.4,.65)):
+            self.box('leaves',x,y,z*s,r*s,r*s,.55*s,(.018,.09,.04,1))
 
-    def make_building(self, x, y, sx, sy, h):
-        self.box('Building', x, y, h, sx, sy, h, (0.09, 0.105, 0.125, 1), True)
-        self.box('Roof', x, y, h * 2.08, sx * 1.04, sy * 1.04, .10,
-                 (0.025, 0.03, 0.04, 1))
-        for yy in (-sy * .62, 0, sy * .62):
-            self.box('Window', x + sx * 1.01, y + yy, h * 1.15,
-                     .035, .42, .48, (0.20, 0.43, 0.55, 1), False, True)
+    def building(self,x,y,sx,sy,h,c):
+        self.box('building',x,y,h,sx,sy,h,(.065,.075,.09,1),True)
+        self.box('roof',x,y,h*2.04,sx*1.05,sy*1.05,.1,(.015,.02,.03,1))
+        for yy in (-sy*.62,0,sy*.62):
+            self.box('window',x+sx*1.01,y+yy,h*1.15,.035,.38,.43,c,False,True)
 
-    def build_world(self):
-        self.box('Ground', 0, 0, -0.35, 32, 32, .35, (0.055, 0.075, 0.07, 1))
-        tile_colors = [
-            (0.065, 0.085, 0.078, 1), (0.052, 0.070, 0.064, 1),
-            (0.075, 0.092, 0.082, 1), (0.048, 0.065, 0.060, 1)
-        ]
-        for ix in range(-5, 6):
-            for iy in range(-5, 6):
-                if (ix + iy) % 3 == 0:
-                    self.box('GroundPatch', ix * 5.5, iy * 5.5, .012,
-                             2.7, 2.7, .015, random.choice(tile_colors))
+    def lamp(self,x,y):
+        self.box('pole',x,y,2.8,.08,.08,2.8,(.045,.05,.06,1),True)
+        self.box('lamp',x,y,5.5,.22,.22,.1,(1,.68,.25,1),False,True)
+        p=PointLight('street'); p.setColor(Vec4(1,.58,.22,1)); p.setAttenuation((1,.12,.03))
+        n=self.render.attachNewNode(p); n.setPos(x,y,5.35); self.render.setLight(n)
 
-        self.box('Road', 0, 0, .025, 5.0, 31, .025, (0.045, 0.048, 0.052, 1))
-        for y in range(-28, 29, 4):
-            self.box('RoadMark', 0, y, .06, .12, 1.0, .025, (0.72, 0.66, 0.40, 1))
+    def world(self):
+        self.box('ground',0,0,-.35,32,32,.35,(.035,.048,.044,1))
+        for ix in range(-6,7):
+            for iy in range(-6,7):
+                if random.random()<.7:
+                    self.box('ground_detail',ix*4.7,iy*4.7,.01,2.1,2.1,.012,random.choice([( .045,.058,.052,1),(.052,.064,.057,1),(.03,.042,.039,1)]))
+        road=(.026,.029,.034,1)
+        self.box('road',0,0,.03,4.5,32,.03,road); self.box('road_cross',0,0,.035,32,4.5,.035,road)
+        for q in range(-28,29,4):
+            self.box('mark',0,q,.07,.1,1.05,.018,(.68,.58,.3,1),False,True)
+            self.box('mark',q,0,.072,1.05,.1,.018,(.68,.58,.3,1),False,True)
+        self.box('sidewalk',7,0,.08,1.1,31,.08,(.085,.09,.088,1),True)
+        self.box('sidewalk',-7,0,.08,1.1,31,.08,(.085,.09,.088,1),True)
+        self.box('sidewalk',0,7,.085,31,1.1,.085,(.085,.09,.088,1),True)
+        self.box('sidewalk',0,-7,.09,31,1.1,.09,(.085,.09,.088,1),True)
+        self.building(-13,12,3.4,4,3.4,(.12,.42,.56,1)); self.building(13,12,4,3.2,4.1,(.45,.2,.14,1))
+        self.building(-13,-12,3,3.5,3,(.16,.4,.27,1)); self.building(13,-12,4,3,3.7,(.42,.27,.1,1))
+        for x,y,s in [(-22,-20,1.1),(-19,-15,.8),(-24,9,1),(-19,19,.9),(20,19,1),(24,9,.8),(21,-20,1.1),(-20,-2,.8),(21,2,.9),(27,23,.9)]: self.tree(x,y,s)
+        for x,y in [(-4,-16),(4,-8),(-4,0),(4,8),(-4,16),(-16,-4),(-8,4),(8,-4),(16,4)]: self.lamp(x,y)
+        self.box('crate',9,8,.85,1.2,1.2,.85,(.28,.17,.07,1),True)
+        self.box('crate',10.6,8.1,.65,.9,.9,.65,(.22,.13,.055,1),True)
+        self.box('barrier',-9,6,.65,2.8,.38,.65,(.15,.16,.17,1),True)
+        self.box('container',9,-10,1.4,2.2,3.8,1.4,(.045,.17,.21,1),True)
+        for i,(x,y) in enumerate([(-9,-4),(6,14),(17,-3)]):
+            t=self.box('terminal',x,y,1.1,.65,.42,1.1,(.025,.22,.28,1),True)
+            self.box('screen',x,y-.45,1.25,.38,.025,.24,(.1,.75,.95,1),False,True)
+            self.terminals.append((t,f'Terminal {i+1}'))
+        wall=(.015,.02,.03,1)
+        self.box('north',0,31.5,2.4,32,.5,2.4,wall,True); self.box('south',0,-31.5,2.4,32,.5,2.4,wall,True)
+        self.box('east',31.5,0,2.4,.5,32,2.4,wall,True); self.box('west',-31.5,0,2.4,.5,32,2.4,wall,True)
+        for _ in range(100):
+            self.box('dust',random.uniform(-29,29),random.uniform(-29,29),random.uniform(.3,6),.015,.015,.015,(.5,.58,.65,.18),False,True)
 
-        self.make_building(-12, 10, 3.5, 4.0, 3.5)
-        self.make_building(12, 12, 4.0, 3.0, 4.2)
-        self.make_building(-13, -12, 3.0, 3.5, 3.0)
-        self.make_building(13, -10, 4.0, 3.0, 3.6)
+    def player(self):
+        self.p=self.render.attachNewNode('Player'); self.p.setPos(0,-2,1)
+        b=self.loader.loadModel('models/box'); b.reparentTo(self.p); b.setScale(.58,.4,.98); b.setColor(.07,.18,.23,1)
+        j=self.loader.loadModel('models/box'); j.reparentTo(self.p); j.setScale(.63,.43,.67); j.setPos(0,0,.05); j.setColor(.11,.13,.15,1)
+        h=self.loader.loadModel('models/box'); h.reparentTo(self.p); h.setScale(.4,.38,.42); h.setPos(0,0,1.42); h.setColor(.38,.45,.45,1)
 
-        for x, y, s in [
-            (-22, -20, 1.0), (-19, -15, .8), (-23, 8, 1.1),
-            (-18, 19, .9), (20, 18, 1.0), (23, 8, .8),
-            (21, -20, 1.1), (-20, -2, .8), (20, 1, .9)
-        ]:
-            self.make_tree(x, y, s)
+    def lights(self):
+        a=AmbientLight('ambient'); a.setColor(Vec4(.16,.19,.25,1)); self.render.setLight(self.render.attachNewNode(a))
+        d=DirectionalLight('moon'); d.setColor(Vec4(.58,.66,.84,1)); n=self.render.attachNewNode(d); n.setHpr(-35,-62,0); self.render.setLight(n)
+        self.pl=PointLight('player_light'); self.pl.setColor(Vec4(.65,.8,1,1)); self.pl.setAttenuation((1,.12,.035))
+        self.pln=self.render.attachNewNode(self.pl); self.pln.reparentTo(self.p); self.pln.setPos(0,.5,1.4); self.render.setLight(self.pln)
+        f=Fog('fog'); f.setColor(.006,.009,.018); f.setExpDensity(.0105); self.render.setFog(f)
+        for _ in range(70): self.box('star',random.uniform(-45,45),random.uniform(-45,45),random.uniform(14,28),.015,.015,.015,(.55,.65,.82,1),False,True)
 
-        for x, y in [(-4, -15), (4, -7), (-4, 1), (4, 9), (-4, 17)]:
-            self.box('LampPole', x, y, 2.7, .10, .10, 2.7, (0.08, 0.09, 0.10, 1), True)
-            self.box('Lamp', x, y, 5.45, .28, .28, .12, (0.85, 0.65, 0.25, 1), False, True)
+    def hud(self):
+        self.title=DirectLabel(text='ECLIPSE',scale=.055,pos=(-1.28,0,.91),text_align=TextNode.ALeft,text_fg=(.42,.8,1,1),frameColor=(0,0,0,0))
+        self.obj=DirectLabel(text='GÖREV: 3 terminali keşfet',scale=.034,pos=(-1.28,0,.82),text_align=TextNode.ALeft,text_fg=(.86,.9,.96,1),frameColor=(0,0,0,0))
+        self.stats=DirectLabel(text='',scale=.031,pos=(-1.28,0,.72),text_align=TextNode.ALeft,text_fg=(.68,.77,.85,1),frameColor=(0,0,0,0))
+        self.msg=DirectLabel(text='',scale=.04,pos=(0,0,-.76),text_align=TextNode.ACenter,text_fg=(1,.82,.42,1),frameColor=(0,0,0,0))
+        DirectLabel(text='WASD | SHIFT koş | SPACE zıpla | F fener | E etkileşim | P duraklat | ESC mouse',scale=.031,pos=(0,0,-.92),text_align=TextNode.ACenter,text_fg=(.66,.72,.8,1),frameColor=(0,0,0,0))
+        self.fps=DirectLabel(text='FPS: --',scale=.031,pos=(1.28,0,.91),text_align=TextNode.ARight,text_fg=(.68,.75,.84,1),frameColor=(0,0,0,0))
+        self.ft=0; self.frames=0; self.fpsv=0
 
-        self.box('CrateA', 7, 7, .9, 1.3, 1.3, .9, (0.34, 0.22, 0.10, 1), True)
-        self.box('CrateB', 8.8, 7.2, .9, 1.0, 1.0, .9, (0.30, 0.19, 0.09, 1), True)
-        self.box('Barrier', -7, 6, .7, 3.0, .45, .7, (0.18, 0.20, 0.22, 1), True)
-        self.box('Container', 8, -9, 1.5, 2.5, 4.0, 1.5, (0.08, 0.23, 0.28, 1), True)
+    def input(self):
+        for k in ('w','a','s','d'):
+            self.accept(k,self.key,[k,True]); self.accept(k+'-up',self.key,[k,False])
+        self.accept('shift',self.key,['shift',True]); self.accept('shift-up',self.key,['shift',False])
+        self.accept('space',self.jump); self.accept('f',self.toggle_flash); self.accept('e',self.interact)
+        self.accept('p',self.pause); self.accept('escape',self.toggle_mouse)
 
-        wall = (0.025, 0.032, 0.045, 1)
-        self.box('WallN', 0, 31.5, 2.5, 32, .5, 2.5, wall, True)
-        self.box('WallS', 0, -31.5, 2.5, 32, .5, 2.5, wall, True)
-        self.box('WallE', 31.5, 0, 2.5, .5, 32, 2.5, wall, True)
-        self.box('WallW', -31.5, 0, 2.5, .5, 32, 2.5, wall, True)
-
-        for i, (x, y) in enumerate([(-8, -5), (6, 14), (16, -3)]):
-            terminal = self.box(f'Terminal{i}', x, y, 1.2, .7, .45, 1.2,
-                                (0.06, 0.30, 0.36, 1), True)
-            self.interactables.append((terminal, f'Terminal {i + 1}'))
-
-        for _ in range(80):
-            x = random.uniform(-28, 28)
-            y = random.uniform(-28, 28)
-            z = random.uniform(.2, 5.5)
-            self.box('Dust', x, y, z, .025, .025, .025,
-                     (0.55, 0.62, 0.65, .22), False, True)
-
-    def build_player(self):
-        self.player = self.render.attachNewNode('Player')
-        self.player.setPos(0, 0, 1.0)
-
-        body = self.loader.loadModel('models/box')
-        body.reparentTo(self.player)
-        body.setScale(.62, .42, 1.0)
-        body.setColor(.12, .27, .34, 1)
-
-        head = self.loader.loadModel('models/box')
-        head.reparentTo(self.player)
-        head.setScale(.43, .40, .43)
-        head.setPos(0, 0, 1.43)
-        head.setColor(.40, .50, .52, 1)
-
-        shoulder = self.box('PlayerLight', 0, .45, 1.15, .06, .06, .06,
-                            (1.0, .82, .52, 1), False, True)
-        shoulder.reparentTo(self.player)
-
-    def build_lighting(self):
-        self.ambient = AmbientLight('ambient')
-        self.ambient.setColor(Vec4(.24, .27, .32, 1))
-        self.render.setLight(self.render.attachNewNode(self.ambient))
-
-        self.sun = DirectionalLight('moon_sun')
-        self.sun.setColor(Vec4(.75, .80, .92, 1))
-        self.sun_node = self.render.attachNewNode(self.sun)
-        self.sun_node.setHpr(-38, -58, 0)
-        self.render.setLight(self.sun_node)
-
-        self.flash = self.box('FlashlightGlow', 0, 1.3, 1.35, .35, 1.2, .22,
-                              (0.75, 0.88, 1.0, .55), False, True)
-        self.flash.reparentTo(self.player)
-        self.flash.setTransparency(TransparencyAttrib.MAlpha)
-
-        fog = Fog('atmosphere')
-        fog.setColor(.008, .012, .022)
-        fog.setExpDensity(.010)
-        self.render.setFog(fog)
-
-    def build_hud(self):
-        self.title = DirectLabel(text='ECLIPSE', scale=.055, pos=(-1.28, 0, .90),
-                                 text_align=TextNode.ALeft, text_fg=(.45, .82, 1, 1),
-                                 frameColor=(0, 0, 0, 0))
-        self.objective = DirectLabel(text='GÖREV: Bölgeyi keşfet', scale=.035,
-                                     pos=(-1.28, 0, .81), text_align=TextNode.ALeft,
-                                     text_fg=(.85, .90, .96, 1), frameColor=(0, 0, 0, 0))
-        self.stats = DirectLabel(text='', scale=.032, pos=(-1.28, 0, .73),
-                                 text_align=TextNode.ALeft, text_fg=(.72, .80, .86, 1),
-                                 frameColor=(0, 0, 0, 0))
-        self.controls = DirectLabel(
-            text='WASD hareket | SHIFT koş | SPACE zıpla | F fener | E etkileşim | ESC mouse',
-            scale=.032, pos=(0, 0, -.92), text_align=TextNode.ACenter,
-            text_fg=(.68, .74, .82, 1), frameColor=(0, 0, 0, 0)
-        )
-        self.message = DirectLabel(text='', scale=.040, pos=(0, 0, -.76),
-                                   text_align=TextNode.ACenter, text_fg=(1, .86, .50, 1),
-                                   frameColor=(0, 0, 0, 0))
-        self.fps = DirectLabel(text='FPS: --', scale=.032, pos=(1.28, 0, .90),
-                               text_align=TextNode.ARight, text_fg=(.70, .76, .84, 1),
-                               frameColor=(0, 0, 0, 0))
-        self.ft = 0.0
-        self.frames = 0
-        self.fps_value = 0
-
-    def bind_input(self):
-        for k in ('w', 'a', 's', 'd'):
-            self.accept(k, self.set_key, [k, True])
-            self.accept(k + '-up', self.set_key, [k, False])
-        self.accept('shift', self.set_key, ['shift', True])
-        self.accept('shift-up', self.set_key, ['shift', False])
-        self.accept('space', self.jump)
-        self.accept('escape', self.toggle_mouse)
-        self.accept('f', self.toggle_flashlight)
-        self.accept('e', self.interact)
-
-    def set_key(self, key, value):
-        self.keys[key] = value
-
+    def key(self,k,v): self.keys[k]=v
     def jump(self):
-        if self.on_ground:
-            self.vz = self.jump_speed
-            self.on_ground = False
+        if not self.paused and self.on_ground: self.vz=self.jump_speed; self.on_ground=False
+    def pause(self): self.paused=not self.paused; self.message('Oyun duraklatıldı' if self.paused else 'Oyun devam ediyor')
+    def toggle_flash(self):
+        self.flashlight=not self.flashlight
+        if self.flashlight:self.render.setLight(self.pln)
+        else:self.render.clearLight(self.pln)
+        self.message('Fener açıldı' if self.flashlight else 'Fener kapatıldı')
+    def message(self,t): self.msg['text']=t; self.message_timer=2.0
 
-    def toggle_flashlight(self):
-        self.flashlight = not self.flashlight
-        if self.flashlight:
-            self.flash.show()
-        else:
-            self.flash.hide()
-        self.show_message('Fener açıldı' if self.flashlight else 'Fener kapatıldı')
-
-    def interact(self):
-        nearest = None
-        best = 999.0
-        for node, label in self.interactables:
-            d = (node.getPos(self.render) - self.player.getPos(self.render)).length()
-            if d < best:
-                best = d
-                nearest = label
-        if nearest and best < 3.2:
-            self.discovered.add(nearest)
-            self.objective['text'] = f'GÖREV: {len(self.discovered)}/3 terminal bulundu'
-            self.show_message(f'{nearest} incelendi')
-            if len(self.discovered) == 3:
-                self.show_message('Bölge keşfi tamamlandı!')
-
-    def show_message(self, text):
-        self.message['text'] = text
-        self.message_timer = 2.2
-
-    def capture_mouse(self):
-        p = WindowProperties()
-        p.setCursorHidden(True)
-        self.win.requestProperties(p)
-        self.center_mouse()
-
-    def center_mouse(self):
-        if self.win:
-            self.win.movePointer(0, self.win.getXSize() // 2, self.win.getYSize() // 2)
-
+    def capture(self):
+        p=WindowProperties(); p.setCursorHidden(True); self.win.requestProperties(p); self.center()
+    def center(self): self.win.movePointer(0,self.win.getXSize()//2,self.win.getYSize()//2)
     def toggle_mouse(self):
-        self.mouse_captured = not self.mouse_captured
-        p = WindowProperties()
-        p.setCursorHidden(self.mouse_captured)
-        self.win.requestProperties(p)
-        if self.mouse_captured:
-            self.center_mouse()
-
-    def mouse_look(self):
-        if not self.mouse_captured:
-            return
-        cx, cy = self.win.getXSize() // 2, self.win.getYSize() // 2
-        pointer = self.win.getPointer(0)
-        dx, dy = pointer.getX() - cx, pointer.getY() - cy
+        self.mouse_captured=not self.mouse_captured; p=WindowProperties(); p.setCursorHidden(self.mouse_captured); self.win.requestProperties(p)
+        if self.mouse_captured:self.center()
+    def mouse(self):
+        if not self.mouse_captured or self.paused:return
+        cx,cy=self.win.getXSize()//2,self.win.getYSize()//2; q=self.win.getPointer(0)
+        dx=q.getX()-cx; dy=q.getY()-cy
         if dx or dy:
-            self.yaw -= dx * self.sensitivity
-            self.target_pitch -= dy * self.sensitivity
-            self.target_pitch = max(-55, min(32, self.target_pitch))
-            self.center_mouse()
+            self.yaw-=dx*self.sensitivity; self.target_pitch=max(-52,min(28,self.target_pitch-dy*self.sensitivity)); self.center()
 
-    def blocked(self, x, y):
-        for ox, oy, hx, hy, top in self.obstacles:
-            if self.player.getZ() - 0.9 < top:
-                qx = max(ox - hx, min(x, ox + hx))
-                qy = max(oy - hy, min(y, oy + hy))
-                if (x - qx) ** 2 + (y - qy) ** 2 < self.radius ** 2:
-                    return True
+    def blocked(self,x,y):
+        for ox,oy,hx,hy,top in self.obstacles:
+            if self.p.getZ()-.82<top:
+                qx=max(ox-hx,min(x,ox+hx)); qy=max(oy-hy,min(y,oy+hy))
+                if (x-qx)**2+(y-qy)**2<self.radius**2:return True
         return False
+    def move(self,dx,dy):
+        x,y=self.p.getX(),self.p.getY()
+        if not self.blocked(x+dx,y):self.p.setX(x+dx)
+        x,y=self.p.getX(),self.p.getY()
+        if not self.blocked(x,y+dy):self.p.setY(y+dy)
+    def interact(self):
+        if self.paused:return
+        best=999; near=None
+        for n,label in self.terminals:
+            d=(n.getPos(self.render)-self.p.getPos(self.render)).length()
+            if d<best:best=d;near=label
+        if near and best<3.3:
+            self.found.add(near); self.obj['text']=f'GÖREV: {len(self.found)}/3 terminal bulundu'; self.message(near+' incelendi')
+            if len(self.found)==3:self.message('BÖLGE KEŞFİ TAMAMLANDI!')
 
-    def move(self, dx, dy):
-        x, y = self.player.getX(), self.player.getY()
-        if not self.blocked(x + dx, y):
-            self.player.setX(x + dx)
-        x, y = self.player.getX(), self.player.getY()
-        if not self.blocked(x, y + dy):
-            self.player.setY(y + dy)
+    def camera(self):
+        self.pitch+=(self.target_pitch-self.pitch)*.12; self.p.setH(self.yaw)
+        y=math.radians(self.yaw); p=math.radians(self.pitch); hd=self.camera_distance*math.cos(p); t=self.p.getPos()+Vec3(0,0,1.05)
+        self.camera.setPos(t.x-math.sin(y)*hd,t.y-math.cos(y)*hd,t.z+self.camera_height+self.camera_distance*math.sin(p)); self.camera.lookAt(t)
 
-    def update_camera(self):
-        self.pitch += (self.target_pitch - self.pitch) * .12
-        self.player.setH(self.yaw)
-        yaw = math.radians(self.yaw)
-        pitch = math.radians(self.pitch)
-        hdist = self.camera_distance * math.cos(pitch)
-        target = self.player.getPos() + Vec3(0, 0, 1.15)
-        self.camera.setPos(
-            target.x - math.sin(yaw) * hdist,
-            target.y - math.cos(yaw) * hdist,
-            target.z + self.camera_height + self.camera_distance * math.sin(pitch)
-        )
-        self.camera.lookAt(target)
-
-    def update(self, task):
-        dt = min(globalClock.getDt(), .05)
-        self.mouse_look()
-
-        mx = (-1 if self.keys['a'] else 0) + (1 if self.keys['d'] else 0)
-        my = (1 if self.keys['w'] else 0) + (-1 if self.keys['s'] else 0)
-        length = math.hypot(mx, my)
-
-        sprinting = self.keys['shift'] and my > 0 and self.stamina > 0 and length > 0
-        if sprinting:
-            self.stamina = max(0, self.stamina - 28 * dt)
-        else:
-            self.stamina = min(100, self.stamina + 18 * dt)
-
-        if length:
-            mx, my = mx / length, my / length
-            yaw = math.radians(self.yaw)
-            fx, fy = math.sin(yaw), math.cos(yaw)
-            rx, ry = math.cos(yaw), -math.sin(yaw)
-            speed = self.sprint_speed if sprinting else self.speed
-            self.move((fx * my + rx * mx) * speed * dt,
-                      (fy * my + ry * mx) * speed * dt)
-
-        self.vz -= self.gravity * dt
-        z = self.player.getZ() + self.vz * dt
-        if z <= 1.0:
-            z, self.vz, self.on_ground = 1.0, 0.0, True
-        else:
-            self.on_ground = False
-        self.player.setZ(z)
-
-        self.player.setX(max(-30, min(30, self.player.getX())))
-        self.player.setY(max(-30, min(30, self.player.getY())))
-        self.update_camera()
-
-        self.ft += dt
-        self.frames += 1
-        if self.ft >= .5:
-            self.fps_value = int(self.frames / self.ft)
-            self.ft, self.frames = 0, 0
-
-        state = 'YERDE' if self.on_ground else 'HAVADA'
-        self.stats['text'] = (
-            f'CAN  {self.health}    STAMINA  {self.stamina:03.0f}\n'
-            f'Konum  {self.player.getX():.1f}, {self.player.getY():.1f}    {state}'
-        )
-        self.fps['text'] = f'FPS: {self.fps_value}'
-
-        if self.message_timer > 0:
-            self.message_timer -= dt
-            if self.message_timer <= 0:
-                self.message['text'] = ''
-
+    def update(self,task):
+        dt=min(globalClock.getDt(),.05); self.mouse()
+        if not self.paused:
+            mx=(-1 if self.keys['a'] else 0)+(1 if self.keys['d'] else 0); my=(1 if self.keys['w'] else 0)+(-1 if self.keys['s'] else 0)
+            moving=math.hypot(mx,my)>0
+            if moving:
+                l=math.hypot(mx,my); mx/=l; my/=l; y=math.radians(self.yaw); fx,fy=math.sin(y),math.cos(y); rx,ry=math.cos(y),-math.sin(y)
+                sprint=self.keys['shift'] and self.stamina>1; sp=self.sprint_speed if sprint else self.speed
+                self.move((fx*my+rx*mx)*sp*dt,(fy*my+ry*mx)*sp*dt)
+                self.stamina=max(0,self.stamina-28*dt) if sprint else min(100,self.stamina+16*dt); self.bob+=dt*(12 if sprint else 8)
+            else:self.stamina=min(100,self.stamina+22*dt)
+            self.vz-=self.gravity*dt; z=self.p.getZ()+self.vz*dt
+            if z<=1:z=1; self.vz=0; self.on_ground=True
+            else:self.on_ground=False
+            self.p.setZ(z); self.p.setX(max(-29,min(29,self.p.getX()))); self.p.setY(max(-29,min(29,self.p.getY())))
+        self.camera()
+        self.message_timer-=dt
+        if self.message_timer<=0:self.msg['text']=''
+        self.ft+=dt; self.frames+=1
+        if self.ft>=.5:self.fpsv=int(self.frames/self.ft); self.ft=0; self.frames=0
+        state='YERDE' if self.on_ground else 'HAVADA'; mouse='AKTİF' if self.mouse_captured else 'SERBEST'
+        self.stats['text']=f'CAN: {self.health}%  STAMINA: {int(self.stamina)}%\nKONUM: {self.p.getX():.1f}, {self.p.getY():.1f}\nDURUM: {state} | FENER: {"AÇIK" if self.flashlight else "KAPALI"} | MOUSE: {mouse}'
+        self.fps['text']=f'FPS: {self.fpsv}'
         return Task.cont
 
-
-if __name__ == '__main__':
-    EclipseGame().run()
+if __name__=='__main__': EclipseGame().run()
