@@ -1,5 +1,8 @@
 #include "Camera.h"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace DirectX;
 
 Camera::Camera()
