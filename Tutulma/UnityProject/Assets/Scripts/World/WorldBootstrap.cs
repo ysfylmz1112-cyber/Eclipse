@@ -10,10 +10,10 @@ namespace Tutulma.World
         private void Start()
         {
             if (sun == null)
-                Debug.LogWarning("WorldBootstrap: Sun atanmadı.");
+                Debug.LogWarning("WorldBootstrap: Sun atanamadi.");
 
             if (player == null)
-                Debug.LogWarning("WorldBootstrap: Player atanmadı.");
+                Debug.LogWarning("WorldBootstrap: Player atanamadi.");
         }
     }
 }
