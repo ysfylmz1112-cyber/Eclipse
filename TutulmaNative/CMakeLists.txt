@@ -9,7 +9,7 @@ add_executable(TutulmaNative WIN32
     src/main.cpp
     src/Game.cpp
     src/Game.h
-    src/Renderer.cpp
+    src/RendererBetter.cpp
     src/Renderer.h
     src/Camera.cpp
     src/Camera.h
