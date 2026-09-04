@@ -6,7 +6,7 @@
 class Renderer final{
 public:
  struct Vertex{DirectX::XMFLOAT3 position;DirectX::XMFLOAT3 normal;DirectX::XMFLOAT4 color;float emissive;};
- struct ConstantBufferData{DirectX::XMMATRIX worldViewProjection;DirectX::XMFLOAT4 tint;};
+ struct ConstantBufferData{DirectX::XMMATRIX worldViewProjection;DirectX::XMFLOAT4 tint;DirectX::XMFLOAT4 scene;};
  bool Initialize(HWND,int,int);void Resize(int,int);void BeginFrame(float);void Draw(const DirectX::XMMATRIX&,const DirectX::XMMATRIX&,float,float);void EndFrame();
 private:
  bool CreateDevice(HWND);bool CreateShaders();bool CreateGeometry();bool CreateTargets(int,int);bool CreateRasterizerState();
