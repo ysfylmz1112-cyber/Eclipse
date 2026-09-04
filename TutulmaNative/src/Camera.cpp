@@ -27,7 +27,6 @@ void Camera::Update(float dt, float moveForward, float moveRight, float mouseDX,
     constexpr float eyeHeight = 1.8f;
 
     yaw_ += mouseDX * mouseSensitivity;
-    // Standard FPS convention: mouse up -> look up.
     pitch_ -= mouseDY * mouseSensitivity;
 
     const float limit = XMConvertToRadians(89.0f);
@@ -42,8 +41,10 @@ void Camera::Update(float dt, float moveForward, float moveRight, float mouseDX,
     XMFLOAT3 candidate{};
     XMStoreFloat3(&candidate, pos);
     const float minimumY = TerrainHeight(candidate.x, candidate.z) + eyeHeight;
-    if (candidate.y < minimumY) candidate.y = minimumY;
-    XMStoreFloat3(&position_, candidate);
+    if (candidate.y < minimumY) {
+        candidate.y = minimumY;
+    }
+    XMStoreFloat3(&position_, XMLoadFloat3(&candidate));
 }
 
 XMMATRIX Camera::View() const {
