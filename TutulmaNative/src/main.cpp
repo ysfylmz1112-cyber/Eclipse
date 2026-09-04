@@ -5,60 +5,106 @@
 
 namespace {
 Game* g_game = nullptr;
-POINT g_lastMouse{};
+POINT g_mouseCenter{};
 bool g_mouseCaptured = false;
+bool g_ignoreMouseMove = false;
 
 void ShowStartupError(const wchar_t* title, const std::wstring& message) {
     MessageBoxW(nullptr, message.c_str(), title, MB_OK | MB_ICONERROR);
+}
+
+void CenterMouse(HWND hwnd) {
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    POINT center{
+        (client.right - client.left) / 2,
+        (client.bottom - client.top) / 2
+    };
+    ClientToScreen(hwnd, &center);
+    g_mouseCenter = center;
+    g_ignoreMouseMove = true;
+    SetCursorPos(center.x, center.y);
+}
+
+void CaptureMouse(HWND hwnd) {
+    SetCapture(hwnd);
+    ShowCursor(FALSE);
+    g_mouseCaptured = true;
+    CenterMouse(hwnd);
+}
+
+void ReleaseMouse() {
+    if (!g_mouseCaptured) return;
+    ReleaseCapture();
+    ShowCursor(TRUE);
+    g_mouseCaptured = false;
+    g_ignoreMouseMove = false;
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_SIZE:
         if (g_game) g_game->Resize(LOWORD(lParam), HIWORD(lParam));
+        if (g_mouseCaptured) CenterMouse(hwnd);
         return 0;
+
+    case WM_SETFOCUS:
+        if (g_mouseCaptured) CenterMouse(hwnd);
+        return 0;
+
+    case WM_KILLFOCUS:
+        ReleaseMouse();
+        return 0;
+
     case WM_KEYDOWN:
         if (g_game) g_game->OnKeyDown(wParam);
-        if (wParam == VK_ESCAPE) PostQuitMessage(0);
+        if (wParam == VK_ESCAPE) {
+            PostQuitMessage(0);
+        }
         return 0;
+
     case WM_KEYUP:
         if (g_game) g_game->OnKeyUp(wParam);
         return 0;
+
     case WM_LBUTTONDOWN:
-        SetCapture(hwnd);
-        ShowCursor(FALSE);
-        GetCursorPos(&g_lastMouse);
-        g_mouseCaptured = true;
+        CaptureMouse(hwnd);
         return 0;
+
     case WM_LBUTTONUP:
-        ReleaseCapture();
-        ShowCursor(TRUE);
-        g_mouseCaptured = false;
         return 0;
+
     case WM_MOUSEMOVE:
         if (g_mouseCaptured && g_game) {
+            if (g_ignoreMouseMove) {
+                g_ignoreMouseMove = false;
+                return 0;
+            }
+
             POINT p;
             GetCursorPos(&p);
-            g_game->OnMouseDelta(static_cast<float>(p.x - g_lastMouse.x),
-                                 static_cast<float>(p.y - g_lastMouse.y));
-            g_lastMouse = p;
+            const float dx = static_cast<float>(p.x - g_mouseCenter.x);
+            const float dy = static_cast<float>(p.y - g_mouseCenter.y);
+
+            if (dx != 0.0f || dy != 0.0f) {
+                g_game->OnMouseDelta(dx, dy);
+                CenterMouse(hwnd);
+            }
         }
         return 0;
+
     case WM_DESTROY:
-        if (g_mouseCaptured) {
-            ReleaseCapture();
-            ShowCursor(TRUE);
-            g_mouseCaptured = false;
-        }
+        ReleaseMouse();
         PostQuitMessage(0);
         return 0;
+
     default:
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 }
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     const wchar_t* className = L"TutulmaNativeWindow";
 
     WNDCLASSW wc{};
@@ -76,19 +122,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         return 10;
     }
 
-    RECT rect{0, 0, 1600, 900};
-    if (!AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE)) {
-        ShowStartupError(L"Tutulma - Baslatma Hatasi",
-            L"Pencere boyutu ayarlanamadi. Windows hata kodu: " +
-            std::to_wstring(GetLastError()));
-        return 11;
-    }
+    // Start as a real borderless fullscreen game window instead of a desktop-style window.
+    const HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO monitorInfo{sizeof(MONITORINFO)};
+    GetMonitorInfoW(monitor, &monitorInfo);
+    const RECT fullscreen = monitorInfo.rcMonitor;
+    const int width = fullscreen.right - fullscreen.left;
+    const int height = fullscreen.bottom - fullscreen.top;
 
     HWND window = CreateWindowExW(
-        0, className, L"TUTULMA - Native Prototype",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        rect.right - rect.left, rect.bottom - rect.top,
+        WS_EX_APPWINDOW,
+        className, L"TUTULMA",
+        WS_POPUP | WS_VISIBLE,
+        fullscreen.left, fullscreen.top,
+        width, height,
         nullptr, nullptr, instance, nullptr);
 
     if (!window) {
@@ -106,17 +153,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
 
     RECT client{};
     GetClientRect(window, &client);
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
+    const int clientWidth = client.right - client.left;
+    const int clientHeight = client.bottom - client.top;
 
-    if (width <= 0 || height <= 0) {
+    if (clientWidth <= 0 || clientHeight <= 0) {
         DestroyWindow(window);
         g_game = nullptr;
         ShowStartupError(L"Tutulma - Baslatma Hatasi", L"Gecerli bir pencere boyutu alinamadi.");
         return 13;
     }
 
-    if (!game.Initialize(window, width, height)) {
+    if (!game.Initialize(window, clientWidth, clientHeight)) {
         DestroyWindow(window);
         g_game = nullptr;
         ShowStartupError(L"Tutulma - DirectX Hatasi",
@@ -145,6 +192,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         game.Render();
     }
 
+    ReleaseMouse();
     g_game = nullptr;
     return static_cast<int>(msg.wParam);
 }
