@@ -17,7 +17,10 @@ void Camera::Update(float dt, float moveForward, float moveRight, float mouseDX,
     constexpr float moveSpeed = 8.0f;
 
     yaw_ += mouseDX * mouseSensitivity;
-    pitch_ += mouseDY * mouseSensitivity;
+
+    // Standard FPS convention: move mouse up -> look up.
+    pitch_ -= mouseDY * mouseSensitivity;
+
     const float limit = XMConvertToRadians(89.0f);
     pitch_ = std::clamp(pitch_, -limit, limit);
 
