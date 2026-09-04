@@ -16,24 +16,21 @@ struct O{float4 p:SV_POSITION;float3 n:NORMAL;float4 c:COLOR;float e:TEXCOORD0;f
 O main(I i){
     O o; float3 p=i.p;
     float t=scene.z;
-    // e=1: Sun. It grows after totality and moves slightly toward camera.
+    // The Sun is calm before totality, then suddenly expands and moves toward camera.
     if(i.e>0.5 && i.e<1.5){
-        float grow=1.0 + scene.x*0.95;
+        float post=saturate((t-19.0)/2.0);
+        float grow=1.0 + post*2.0;
         float3 center=float3(0,78,230);
         p=center+(p-center)*grow;
-        p.z -= scene.x*18.0;
+        p.z -= post*42.0;
     }
-    // e=2: Moon. It crosses from left to right in front of the Sun.
+    // The Moon travels across the Sun and stays directly in front during totality.
     if(i.e>1.5 && i.e<2.5){
-        float moonX=0.0;
-        if(scene.y < 0.999){
-            float u=saturate(scene.y);
-            moonX=-42.0 + 84.0*u;
-        }
+        float moonX=-42.0 + 84.0*saturate(scene.y);
         float3 center=float3(moonX,78,222);
         p=center+(p-float3(0,78,222));
     }
-    // e=3: NPCs panic and run when the eclipse reaches totality.
+    // Human-sized NPCs panic and run once totality is reached.
     if(i.e>2.5 && i.e<3.5){
         float panic=saturate(scene.w);
         float dir=(p.x>=0.0)?1.0:-1.0;
@@ -53,15 +50,15 @@ float4 main(I i):SV_TARGET{
         return float4(moon+rim*float3(.12,.12,.14),1);
     }
     if(i.e>0.5 && i.e<1.5){
+        float post=saturate((scene.z-19.0)/2.0);
         float pulse=1.0+0.12*sin(scene.z*8.0);
-        float3 sun=i.c.rgb*(4.0+scene.x*2.5)*pulse;
+        float3 sun=i.c.rgb*(4.0+post*5.0)*pulse;
         return float4(saturate(sun),1);
     }
     float3 n=normalize(i.n);
     float3 sunDir=normalize(float3(-.35,.82,-.45));
     float diffuse=.24+.76*saturate(dot(n,sunDir));
     float3 c=i.c.rgb*diffuse*tint.rgb;
-    // Simple distance fog gives the scene depth instead of a black horizon.
     float dist=length(i.world-float3(0,0,-12));
     float fog=saturate((dist-220.0)/700.0);
     float3 fogColor=float3(.16,.25,.36)*tint.rgb;
@@ -101,7 +98,6 @@ void sphere(std::vector<Renderer::Vertex>&v,float x,float y,float z,float r,XMFL
 }
 
 float terrain(float x,float z){
-    // Broad rolling hills + distant mountains, shared conceptually with camera height.
     float h=2.0f*sinf(x*0.018f)+1.5f*cosf(z*0.021f)+1.0f*sinf((x+z)*0.035f);
     float ridge=sinf(z*0.010f)*sinf(x*0.022f);
     h+=std::max(0.0f,ridge)*18.0f;
@@ -124,7 +120,6 @@ void terrainMesh(std::vector<Renderer::Vertex>&v){
 
 void building(std::vector<Renderer::Vertex>&v,float x,float z,float w,float h,float d,XMFLOAT4 c){
     float y=terrain(x,z); cube(v,x,y,z,w,h,d,c);
-    // roof slab and simple windows.
     cube(v,x,y+h,z,w+0.5f,0.45f,d+0.5f,{0.08f,0.09f,0.11f,1});
     for(int side=-1;side<=1;side+=2)for(int row=0;row<3;row++)
         cube(v,x+side*(w*0.5f+0.015f),y+3.0f+row*4.0f,z,0.05f,1.8f,2.4f,{0.35f,0.55f,0.68f,1});
@@ -164,13 +159,10 @@ bool Renderer::CreateRasterizerState(){D3D11_RASTERIZER_DESC d{};d.FillMode=D3D1
 bool Renderer::CreateGeometry(){
     std::vector<Vertex>v; v.reserve(150000);
     terrainMesh(v);
-
-    // Main road, side street and lane markings.
     cube(v,0,terrain(0,120)+0.10f,250,10,0.16f,620,{0.035f,0.04f,0.045f,1});
     for(int z=-20;z<550;z+=14) cube(v,0,terrain(0,(float)z)+0.20f,(float)z,0.28f,0.03f,6,{0.92f,0.80f,0.28f,1});
     cube(v,75,terrain(75,250)+0.10f,250,150,0.16f,8,{0.035f,0.04f,0.045f,1});
 
-    // City blocks.
     for(int i=-4;i<=4;i++){
         float x=i*34.0f;
         building(v,x,75.0f,16.0f,12.0f+(i%3)*5.0f,16.0f,{0.34f,0.32f,0.30f,1});
@@ -178,7 +170,6 @@ bool Renderer::CreateGeometry(){
         building(v,x,175.0f,14.0f,10.0f+(i%2)*8.0f,14.0f,{0.40f,0.36f,0.30f,1});
     }
 
-    // Cars with visible bodies, roofs and wheels.
     for(int i=0;i<8;i++){
         float z=20.0f+i*58.0f; float y=terrain(0,z)+0.25f;
         cube(v,0,y,z,3.2f,1.1f,6.2f,{0.55f,0.06f,0.04f,1});
@@ -186,10 +177,8 @@ bool Renderer::CreateGeometry(){
         for(int s=-1;s<=1;s+=2) for(int w=-1;w<=1;w+=2) cube(v,s*1.7f,y-0.05f,z+w*2.0f,0.35f,0.55f,0.75f,{0.025f,0.025f,0.03f,1});
     }
 
-    // NPCs are human-sized and become visibly displaced by the panic animation.
     for(int i=0;i<16;i++) npc(v,-45.0f+(i%8)*12.0f,40.0f+(i/8)*26.0f);
 
-    // Distant mountain ridge made from large, solid pyramidal-looking blocks.
     for(int i=-7;i<=7;i++){
         float x=i*42.0f,z=430.0f+std::abs(i)*3.0f;
         float h=55.0f+18.0f*cosf(i*0.7f);
@@ -197,7 +186,6 @@ bool Renderer::CreateGeometry(){
         cube(v,x,y,z,38.0f,h,55.0f,{0.11f,0.16f,0.14f,1});
     }
 
-    // Sun and Moon are intentionally separate depth layers so the Moon can pass in front.
     sphere(v,0,78,230,19,{1.0f,0.48f,0.025f,1},1);
     sphere(v,-42,78,222,19,{0.025f,0.027f,0.032f,1},2);
 
@@ -227,9 +215,8 @@ void Renderer::Draw(const XMMATRIX&view,const XMMATRIX&projection,float time,flo
         auto*c=(ConstantBufferData*)m.pData;
         c->worldViewProjection=XMMatrixTranspose(view*projection);
         float d=1.0f-eclipse*0.78f;c->tint={d,d*.98f,d*.94f,1};
-        float grow=saturate(0.10f+eclipse*0.90f);
-        float panic=saturate((eclipse-0.72f)*3.6f);
-        c->scene={grow,eclipse,time,panic};
+        float panic=std::clamp((eclipse-0.72f)*3.6f,0.0f,1.0f);
+        c->scene={0.0f,eclipse,time,panic};
         context_->Unmap(constantBuffer_.Get(),0);
     }
     UINT s=sizeof(Vertex),o=0;context_->IASetInputLayout(inputLayout_.Get());context_->IASetVertexBuffers(0,1,vertexBuffer_.GetAddressOf(),&s,&o);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
