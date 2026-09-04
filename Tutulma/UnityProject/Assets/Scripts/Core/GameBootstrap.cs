@@ -6,7 +6,7 @@ namespace Tutulma.Core
     {
         private void Awake()
         {
-            Debug.Log("Tutulma başlatıldı.");
+            Debug.Log("Tutulma baslatildi.");
         }
     }
 }
