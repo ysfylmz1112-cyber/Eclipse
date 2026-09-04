@@ -28,6 +28,7 @@ private:
     bool CreateShaders();
     bool CreateGeometry();
     bool CreateTargets(int width, int height);
+    bool CreateRasterizerState();
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
@@ -39,6 +40,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> vertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constantBuffer_;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> rasterizerState_;
     UINT vertexCount_ = 0;
     int width_ = 1;
     int height_ = 1;
