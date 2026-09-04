@@ -27,7 +27,6 @@ private:
     bool CreateDevice(HWND window);
     bool CreateShaders();
     bool CreateGeometry();
-    bool CreateSunGeometry();
     bool CreateTargets(int width, int height);
     bool CreateRasterizerState();
 
@@ -40,12 +39,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixelShader_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> vertexBuffer_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> sunVertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constantBuffer_;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> rasterizerState_;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> sunDepthState_;
     UINT vertexCount_ = 0;
-    UINT sunVertexCount_ = 0;
     int width_ = 1;
     int height_ = 1;
 };
