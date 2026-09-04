@@ -1,11 +1,16 @@
 #include <windows.h>
 #include <chrono>
+#include <string>
 #include "Game.h"
 
 namespace {
 Game* g_game = nullptr;
 POINT g_lastMouse{};
 bool g_mouseCaptured = false;
+
+void ShowStartupError(const wchar_t* title, const std::wstring& message) {
+    MessageBoxW(nullptr, message.c_str(), title, MB_OK | MB_ICONERROR);
+}
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
@@ -40,6 +45,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
     case WM_DESTROY:
+        if (g_mouseCaptured) {
+            ReleaseCapture();
+            ShowCursor(TRUE);
+            g_mouseCaptured = false;
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -50,41 +60,81 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
     const wchar_t* className = L"TutulmaNativeWindow";
+
     WNDCLASSW wc{};
     wc.hInstance = instance;
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = className;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = nullptr;
     wc.style = CS_HREDRAW | CS_VREDRAW;
-    RegisterClassW(&wc);
+
+    if (!RegisterClassW(&wc)) {
+        const DWORD error = GetLastError();
+        ShowStartupError(L"Tutulma - Baslatma Hatasi",
+            L"Pencere sinifi olusturulamadi. Windows hata kodu: " + std::to_wstring(error));
+        return 10;
+    }
 
     RECT rect{0, 0, 1600, 900};
-    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND window = CreateWindowExW(0, className, L"TUTULMA - Native Prototype",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+    if (!AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE)) {
+        ShowStartupError(L"Tutulma - Baslatma Hatasi",
+            L"Pencere boyutu ayarlanamadi. Windows hata kodu: " +
+            std::to_wstring(GetLastError()));
+        return 11;
+    }
+
+    HWND window = CreateWindowExW(
+        0, className, L"TUTULMA - Native Prototype",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top,
         nullptr, nullptr, instance, nullptr);
-    if (!window) return 1;
+
+    if (!window) {
+        const DWORD error = GetLastError();
+        ShowStartupError(L"Tutulma - Baslatma Hatasi",
+            L"Oyun penceresi olusturulamadi. Windows hata kodu: " + std::to_wstring(error));
+        return 12;
+    }
 
     Game game;
     g_game = &game;
-    ShowWindow(window, showCommand);
+
+    ShowWindow(window, SW_SHOW);
     UpdateWindow(window);
 
     RECT client{};
     GetClientRect(window, &client);
-    if (!game.Initialize(window, client.right - client.left, client.bottom - client.top)) {
-        MessageBoxW(window, L"DirectX 11 baslatilamadi.", L"Tutulma", MB_ICONERROR);
-        return 2;
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+
+    if (width <= 0 || height <= 0) {
+        DestroyWindow(window);
+        g_game = nullptr;
+        ShowStartupError(L"Tutulma - Baslatma Hatasi", L"Gecerli bir pencere boyutu alinamadi.");
+        return 13;
+    }
+
+    if (!game.Initialize(window, width, height)) {
+        DestroyWindow(window);
+        g_game = nullptr;
+        ShowStartupError(L"Tutulma - DirectX Hatasi",
+            L"DirectX 11 baslatilamadi. Donanim/WARP denemesi ve shader asamasi basarisiz oldu.\n\n"
+            L"Oyun bu nedenle sessizce kapanmak yerine artik hatayi gosterecek.");
+        return 14;
     }
 
     auto previous = std::chrono::steady_clock::now();
     MSG msg{};
+
     while (msg.message != WM_QUIT) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+
+        if (msg.message == WM_QUIT) break;
 
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - previous).count();
