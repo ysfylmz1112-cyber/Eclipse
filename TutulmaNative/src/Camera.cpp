@@ -19,7 +19,7 @@ float TerrainHeight(float x, float z) {
 }
 
 Camera::Camera()
-    : position_(0.0f, 5.8f, -12.0f), yaw_(0.0f), pitch_(0.0f), aspect_(16.0f / 9.0f) {}
+    : position_(0.0f, 5.45f, -12.0f), yaw_(0.0f), pitch_(0.0f), aspect_(16.0f / 9.0f) {}
 
 void Camera::SetAspect(float aspect) {
     aspect_ = aspect > 0.0f ? aspect : 1.0f;
@@ -28,7 +28,7 @@ void Camera::SetAspect(float aspect) {
 void Camera::Update(float dt, float moveForward, float moveRight, float mouseDX, float mouseDY) {
     constexpr float mouseSensitivity = 0.0025f;
     constexpr float moveSpeed = 8.0f;
-    constexpr float eyeHeight = 1.72f;
+    constexpr float eyeHeight = 1.65f;
 
     yaw_ += mouseDX * mouseSensitivity;
     pitch_ -= mouseDY * mouseSensitivity;
