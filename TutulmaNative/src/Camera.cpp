@@ -28,9 +28,8 @@ void Camera::SetAspect(float aspect) {
 void Camera::Update(float dt, float moveForward, float moveRight, float mouseDX, float mouseDY) {
     constexpr float mouseSensitivity = 0.0025f;
     constexpr float moveSpeed = 8.0f;
-    constexpr float eyeHeight = 2.0f;
+    constexpr float eyeHeight = 1.72f;
 
-    // Standard FPS convention: mouse up looks up, mouse down looks down.
     yaw_ += mouseDX * mouseSensitivity;
     pitch_ -= mouseDY * mouseSensitivity;
 
